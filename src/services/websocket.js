@@ -36,6 +36,47 @@ import * as workerTimers from 'worker-timers';
 let webSocket = null;
 let lastWebSocketMessage = '';
 
+// Reconnect backoff state. The previous implementation reconnected on a
+// fixed 5 second interval which hammered CPU and the VRChat API during
+// long outages. We now use exponential backoff with jitter and reset on
+// any successful open.
+let reconnectAttempts = 0;
+let reconnectTimerId = null;
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 60_000;
+function scheduleReconnect() {
+    if (reconnectTimerId !== null) {
+        return;
+    }
+    const exp = Math.min(
+        RECONNECT_MAX_MS,
+        RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts)
+    );
+    // Full jitter: random value in [0, exp].
+    const delay = Math.floor(Math.random() * exp);
+    reconnectAttempts = Math.min(reconnectAttempts + 1, 10);
+    reconnectTimerId = workerTimers.setTimeout(() => {
+        reconnectTimerId = null;
+        if (
+            watchState.isLoggedIn &&
+            watchState.isFriendsLoaded &&
+            webSocket === null
+        ) {
+            initWebsocket();
+        }
+    }, delay);
+}
+function cancelReconnect() {
+    if (reconnectTimerId !== null) {
+        try {
+            workerTimers.clearTimeout(reconnectTimerId);
+        } catch (err) {
+            console.error('Error clearing reconnect timer:', err);
+        }
+        reconnectTimerId = null;
+    }
+}
+
 /**
  * Reactive WebSocket state for status bar telemetry.
  * - connected: whether the WS is currently open
@@ -82,6 +123,8 @@ function connectWebSocket(token) {
     const socket = new WebSocket(`${AppDebug.websocketDomain}/?auth=${token}`);
     socket.onopen = () => {
         wsState.connected = true;
+        // Successful connect resets backoff.
+        reconnectAttempts = 0;
         if (AppDebug.debugWebSocket) {
             console.log('WebSocket connected');
         }
@@ -99,15 +142,7 @@ function connectWebSocket(token) {
         if (AppDebug.debugWebSocket) {
             console.log('WebSocket closed');
         }
-        workerTimers.setTimeout(() => {
-            if (
-                watchState.isLoggedIn &&
-                watchState.isFriendsLoaded &&
-                webSocket === null
-            ) {
-                initWebsocket();
-            }
-        }, 5000);
+        scheduleReconnect();
     };
     socket.onerror = () => {
         if (AppDebug.errorNoty) {
@@ -159,6 +194,9 @@ function connectWebSocket(token) {
  * @returns {void}
  */
 export function closeWebSocket() {
+    cancelReconnect();
+    // Operator-initiated close; reset backoff so the next session starts fresh.
+    reconnectAttempts = 0;
     const socket = webSocket;
     if (socket === null) {
         return;

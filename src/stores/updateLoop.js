@@ -64,10 +64,32 @@ export const useUpdateLoopStore = defineStore('UpdateLoop', () => {
 
     const ipcTimeout = state.ipcTimeout;
 
+    // Track the rescheduling timer so the loop can be stopped cleanly
+    // on logout / hot reload instead of spawning orphaned recursive
+    // `workerTimers.setTimeout` chains. `updateLoopStarted` guards
+    // against external callers (App.vue / HMR) starting the loop twice,
+    // which would otherwise spawn two parallel self-scheduling chains.
+    let updateLoopTimerId = null;
+    let updateLoopStarted = false;
+    let updateLoopActive = false;
+
     /**
      *
      */
     async function updateLoop() {
+        if (!updateLoopStarted) {
+            // First external call takes ownership of the loop.
+            updateLoopStarted = true;
+            updateLoopActive = true;
+        } else if (!updateLoopActive) {
+            // Loop has been explicitly stopped; ignore external restart.
+            return;
+        } else if (updateLoopTimerId !== null) {
+            // A tick is already pending via the scheduled timer. This
+            // call path is an external duplicate (HMR / re-mount); bail
+            // so we don't end up with two independent tick chains.
+            return;
+        }
         try {
             if (watchState.isLoggedIn) {
                 if (--state.nextCurrentUserRefresh <= 0) {
@@ -149,7 +171,32 @@ export const useUpdateLoopStore = defineStore('UpdateLoop', () => {
             friendStore.setIsRefreshFriendsLoading(false);
             console.error(err);
         }
-        workerTimers.setTimeout(() => updateLoop(), 1000);
+        if (updateLoopActive) {
+            updateLoopTimerId = workerTimers.setTimeout(() => {
+                // Clear our own id before re-entering `updateLoop` so
+                // the "tick already pending" guard at the top correctly
+                // recognizes this call as the scheduled tick and lets
+                // it proceed.
+                updateLoopTimerId = null;
+                updateLoop();
+            }, 1000);
+        }
+    }
+
+    /**
+     * Cancel the pending `updateLoop` rescheduling timer. The loop will
+     * finish its current iteration but will not schedule the next one.
+     */
+    function stopUpdateLoop() {
+        updateLoopActive = false;
+        if (updateLoopTimerId !== null) {
+            try {
+                workerTimers.clearTimeout(updateLoopTimerId);
+            } catch (err) {
+                console.error('Failed to clear updateLoop timer:', err);
+            }
+            updateLoopTimerId = null;
+        }
     }
 
     /**
@@ -200,6 +247,7 @@ export const useUpdateLoopStore = defineStore('UpdateLoop', () => {
         nextDiscordUpdate,
         ipcTimeout,
         updateLoop,
+        stopUpdateLoop,
         setIpcTimeout,
         setNextCurrentUserRefresh,
         setNextDiscordUpdate,

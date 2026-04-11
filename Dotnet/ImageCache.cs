@@ -99,6 +99,17 @@ internal static class ImageCache
         catch (Exception ex)
         {
             logger.Error(ex, "Failed to fetch image");
+            // Remove the empty cache directory we just created so repeated failures
+            // don't accumulate stub directories and trigger spurious cache evictions.
+            try
+            {
+                if (Directory.Exists(directoryLocation))
+                    Directory.Delete(directoryLocation, true);
+            }
+            catch (Exception cleanupEx)
+            {
+                logger.Warn(cleanupEx, "Failed to clean up partial image cache directory: {0}", directoryLocation);
+            }
             return string.Empty;
         }
 

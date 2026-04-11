@@ -262,9 +262,19 @@ export const useAuthStore = defineStore('Auth', () => {
                 delete user.cookies;
                 relogin(user, {
                     shouldTrackLoginNetworkIssueHint: false
-                }).then(() => {
-                    toast.success(t('message.auth.email_2fa_resent'));
-                });
+                })
+                    .then(() => {
+                        toast.success(t('message.auth.email_2fa_resent'));
+                    })
+                    .catch((err) => {
+                        // Previously this promise had no catch handler, so a
+                        // failed relogin surfaced only as an unhandled
+                        // rejection and the user was left staring at a blank
+                        // 2FA prompt. Surface the failure and return to a
+                        // sane state.
+                        console.error('resendEmail2fa relogin failed', err);
+                        toast.error(t('message.auth.email_2fa_failed'));
+                    });
                 return;
             }
         }
@@ -402,35 +412,41 @@ export const useAuthStore = defineStore('Auth', () => {
                             '{}'
                         )
                     );
+                    // Process each saved credential sequentially. The previous
+                    // implementation fired off all decrypt promises in parallel,
+                    // racing to overwrite a single shared `credentialsToSave.value`
+                    // ref — only the last credential to resolve was actually saved
+                    // and the rest were silently lost.
+                    let anyFailed = false;
                     for (const userId in savedCredentials) {
-                        security
-                            .decrypt(
+                        try {
+                            const pt = await security.decrypt(
                                 savedCredentials[userId].loginParams.password,
                                 value
-                            )
-                            .then(async (pt) => {
-                                credentialsToSave.value = {
-                                    username:
-                                        savedCredentials[userId].loginParams
-                                            .username,
-                                    password: pt
-                                };
-                                await updateStoredUser(
-                                    savedCredentials[userId].user
-                                );
-                                await configRepository.setBool(
-                                    'enablePrimaryPassword',
-                                    false
-                                );
-                            })
-                            .catch(async () => {
-                                advancedSettingsStore.setEnablePrimaryPassword(
-                                    true
-                                );
-                                advancedSettingsStore.setEnablePrimaryPasswordConfigRepository(
-                                    true
-                                );
-                            });
+                            );
+                            credentialsToSave.value = {
+                                username:
+                                    savedCredentials[userId].loginParams
+                                        .username,
+                                password: pt
+                            };
+                            await updateStoredUser(
+                                savedCredentials[userId].user
+                            );
+                        } catch {
+                            anyFailed = true;
+                        }
+                    }
+                    if (anyFailed) {
+                        advancedSettingsStore.setEnablePrimaryPassword(true);
+                        advancedSettingsStore.setEnablePrimaryPasswordConfigRepository(
+                            true
+                        );
+                    } else {
+                        await configRepository.setBool(
+                            'enablePrimaryPassword',
+                            false
+                        );
                     }
                 })
                 .catch((err) => {

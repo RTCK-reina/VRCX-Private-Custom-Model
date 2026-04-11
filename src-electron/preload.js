@@ -6,7 +6,11 @@
  *
  * https://www.electronjs.org/docs/latest/tutorial/sandbox
  */
-const { contextBridge, ipcRenderer, app } = require('electron');
+// Only `contextBridge` and `ipcRenderer` are available in sandboxed
+// preload scripts. Do not add other Electron modules here (e.g. `app`,
+// `shell`, `webFrame`) unless you first confirm they are exposed in the
+// sandbox or disable sandbox mode in BrowserWindow webPreferences.
+const { contextBridge, ipcRenderer } = require('electron');
 
 const managedListeners = new Map();
 

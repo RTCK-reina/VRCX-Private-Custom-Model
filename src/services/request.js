@@ -18,6 +18,52 @@ import webApiService from './webapi.js';
 const pendingGetRequests = new Map();
 export let failedGetRequests = new Map();
 
+// TTL (ms) after which a failed-request entry is considered expired.
+// Kept in sync with the retry check below. Anything older than this
+// serves no further purpose and is purely retained memory.
+const FAILED_REQUEST_TTL_MS = 900000; // 15 minutes
+// Upper bound on stale entries kept around before a forced sweep,
+// protecting against unbounded growth on instances that see a very
+// large number of distinct 403/404 endpoints over a single session
+// (e.g. many deleted worlds / users in feed history).
+const FAILED_REQUEST_MAX_ENTRIES = 2000;
+let failedRequestLastSweep = 0;
+const FAILED_REQUEST_SWEEP_INTERVAL_MS = 60000; // 1 minute
+
+/**
+ * Sweep expired entries from `failedGetRequests`. Runs at most once per
+ * {@link FAILED_REQUEST_SWEEP_INTERVAL_MS} on the common path, and is
+ * forced whenever the map exceeds {@link FAILED_REQUEST_MAX_ENTRIES}.
+ * @param {boolean} [force]
+ */
+function sweepFailedGetRequests(force = false) {
+    const now = Date.now();
+    if (
+        !force &&
+        now - failedRequestLastSweep < FAILED_REQUEST_SWEEP_INTERVAL_MS
+    ) {
+        return;
+    }
+    failedRequestLastSweep = now;
+    const cutoff = now - FAILED_REQUEST_TTL_MS;
+    for (const [endpoint, lastRun] of failedGetRequests) {
+        if (lastRun < cutoff) {
+            failedGetRequests.delete(endpoint);
+        }
+    }
+    // If the map is still oversized after TTL-based eviction, drop
+    // oldest entries first to stay under the hard cap.
+    if (failedGetRequests.size > FAILED_REQUEST_MAX_ENTRIES) {
+        const entries = [...failedGetRequests.entries()].sort(
+            (a, b) => a[1] - b[1]
+        );
+        const over = failedGetRequests.size - FAILED_REQUEST_MAX_ENTRIES;
+        for (let i = 0; i < over; i++) {
+            failedGetRequests.delete(entries[i][0]);
+        }
+    }
+}
+
 const t = i18n.global.t;
 
 /**
@@ -242,6 +288,10 @@ export function request(endpoint, options) {
                 !endpoint.startsWith('auth/user')
             ) {
                 failedGetRequests.set(endpoint, Date.now());
+                // Opportunistic GC so the map doesn't grow forever.
+                sweepFailedGetRequests(
+                    failedGetRequests.size > FAILED_REQUEST_MAX_ENTRIES
+                );
             }
             if (
                 init.method === 'GET' &&
