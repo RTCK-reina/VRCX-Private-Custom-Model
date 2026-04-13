@@ -128,12 +128,12 @@ export function buildHeatmapBuckets(
         let cursor = start;
         while (cursor < end) {
             const date = new Date(cursor);
-            const slot = date.getDay() * 24 + date.getHours();
+            const slot = date.getUTCDay() * 24 + date.getUTCHours();
             const nextHour = new Date(cursor);
-            nextHour.setMinutes(0, 0, 0);
+            nextHour.setUTCMinutes(0, 0, 0);
             nextHour.setTime(nextHour.getTime() + ONE_HOUR_MS);
             const segmentEnd = Math.min(nextHour.getTime(), end);
-            buckets[slot] += (segmentEnd - cursor) / 60000;
+            buckets[slot] += (segmentEnd - cursor) / 3600000;
             cursor = segmentEnd;
         }
     }
@@ -318,7 +318,11 @@ export function findBestOverlapTimeFromBuckets(buckets, dayLabels) {
         return '';
     }
     const peakDayLabel = dayLabels[daySums.indexOf(maxDaySum)];
-    return `${peakDayLabel}, ${String(startHour).padStart(2, '0')}:00-${String(endHour + 1).padStart(2, '0')}:00`;
+    const startStr = `${String(startHour).padStart(2, '0')}:00`;
+    if (startHour === endHour) {
+        return `${peakDayLabel}, ${startStr}`;
+    }
+    return `${peakDayLabel}, ${startStr}-${String(endHour + 1).padStart(2, '0')}:00`;
 }
 
 export function computeActivityView({
@@ -458,12 +462,17 @@ export function buildDailySummary(
 }
 
 function cloneSession(session) {
-    return {
+    const clone = {
         start: session.start,
-        end: session.end,
-        isOpenTail: Boolean(session.isOpenTail),
-        sourceRevision: session.sourceRevision || ''
+        end: session.end
     };
+    if (session.isOpenTail) {
+        clone.isOpenTail = true;
+    }
+    if (session.sourceRevision) {
+        clone.sourceRevision = session.sourceRevision;
+    }
+    return clone;
 }
 
 function percentile(sortedValues, percentileValue) {
