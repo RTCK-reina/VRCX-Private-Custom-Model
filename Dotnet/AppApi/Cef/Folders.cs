@@ -84,11 +84,14 @@ namespace VRCX
 
             try
             {
-                if (!Directory.Exists(path))
+                // Normalize the user-supplied path so that ".." segments are resolved
+                // and we don't silently create directories at unexpected locations.
+                var fullPath = Path.GetFullPath(path);
+                if (!Directory.Exists(fullPath))
                 {
-                    Directory.CreateDirectory(path);
+                    Directory.CreateDirectory(fullPath);
                 }
-                return path;
+                return fullPath;
             }
             catch (Exception e)
             {

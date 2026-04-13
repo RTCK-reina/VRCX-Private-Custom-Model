@@ -212,6 +212,103 @@ const Validate = function () {
     }
 };
 
+// Read-only drift report. Unlike `Validate`, this never writes files; it
+// simply walks every locale against en.json and emits a per-locale diff
+// of missing/extra keys. Returns true if ANY drift was detected, which
+// we use to decide the process exit code when wired into CI.
+const CheckDrift = function () {
+    const files = [...getLocalizationObjects()];
+    const enIndex = files.findIndex(
+        (file) => path.basename(file[0]) === 'en.json'
+    );
+    if (enIndex === -1) {
+        console.error('drift-check: en.json not found under src/localization');
+        return true;
+    }
+    const [, enObj] = files[enIndex];
+    const otherFiles = files.filter((_, idx) => idx !== enIndex);
+
+    const traverse = function (obj, predicate, pathes = []) {
+        for (const key in obj) {
+            if (typeof obj[key] === 'string' || obj[key] instanceof String) {
+                predicate(obj, key, pathes);
+            } else {
+                traverse(obj[key], predicate, [...pathes, key]);
+            }
+        }
+    };
+
+    const collectKeys = (root) => {
+        const keys = new Set();
+        traverse(root, (_, key, pathes) => {
+            keys.add([...pathes, key].join('.'));
+        });
+        return keys;
+    };
+
+    const enKeys = collectKeys(enObj);
+    let anyDrift = false;
+    const summary = [];
+
+    for (const [localePath, localeObj] of otherFiles) {
+        const localeKeys = collectKeys(localeObj);
+
+        const missing = [];
+        for (const key of enKeys) {
+            if (!localeKeys.has(key)) missing.push(key);
+        }
+        const extra = [];
+        for (const key of localeKeys) {
+            if (!enKeys.has(key)) extra.push(key);
+        }
+
+        if (missing.length || extra.length) {
+            anyDrift = true;
+        }
+        summary.push({
+            locale: path.basename(localePath),
+            enTotal: enKeys.size,
+            localeTotal: localeKeys.size,
+            missing: missing.length,
+            extra: extra.length,
+            missingKeys: missing,
+            extraKeys: extra
+        });
+    }
+
+    summary.sort((a, b) => a.locale.localeCompare(b.locale));
+    console.log('Localization drift report (vs en.json):');
+    console.log(`  en.json: ${enKeys.size} keys`);
+    for (const entry of summary) {
+        const label = `  ${entry.locale.padEnd(12)}`;
+        console.log(
+            `${label} total=${entry.localeTotal} missing=${entry.missing} extra=${entry.extra}`
+        );
+        if (process.env.DRIFT_VERBOSE === '1') {
+            if (entry.missingKeys.length) {
+                console.log(`    missing keys (first 20):`);
+                for (const key of entry.missingKeys.slice(0, 20)) {
+                    console.log(`      - ${key}`);
+                }
+            }
+            if (entry.extraKeys.length) {
+                console.log(`    extra keys (first 20):`);
+                for (const key of entry.extraKeys.slice(0, 20)) {
+                    console.log(`      + ${key}`);
+                }
+            }
+        }
+    }
+    if (!anyDrift) {
+        console.log('no drift detected');
+    } else {
+        console.log(
+            '\ndrift detected. Run `npm run localization validate` to sync keys, or set DRIFT_VERBOSE=1 to inspect individual keys.'
+        );
+    }
+    return anyDrift;
+};
+
 const cliParser = yargs(hideBin(process.argv))
     .command({
         command: 'add <key> <value> [above_key]',
@@ -231,6 +328,15 @@ const cliParser = yargs(hideBin(process.argv))
         aliases: [],
         desc: "removes keys from other languages that don't exist in the en translation and adds keys that don't exist in other languages",
         handler: Validate
+    })
+    .command({
+        command: 'check-drift',
+        aliases: ['drift'],
+        desc: 'Read-only drift report vs en.json. Exits non-zero on drift. Set DRIFT_VERBOSE=1 to see individual keys.',
+        handler: () => {
+            const hasDrift = CheckDrift();
+            process.exit(hasDrift ? 1 : 0);
+        }
     })
     .demandCommand(1)
     .example([

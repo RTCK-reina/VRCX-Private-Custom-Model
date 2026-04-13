@@ -49,6 +49,12 @@ namespace VRCX
         [DllImport("kernel32.dll")]
         public static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
 
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool CloseHandle(IntPtr hObject);
+
+        private static readonly IntPtr InvalidHandleValue = new IntPtr(-1);
+
         [StructLayout(LayoutKind.Sequential)]
         public struct PROCESSENTRY32
         {
@@ -186,27 +192,37 @@ namespace VRCX
             List<int> pids = new List<int>();
 
             IntPtr snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            if (snapshot == IntPtr.Zero)
+            if (snapshot == IntPtr.Zero || snapshot == InvalidHandleValue)
             {
+                logger.Warn("CreateToolhelp32Snapshot failed; cannot enumerate child processes for pid {0}", pid);
                 return pids;
             }
 
-            PROCESSENTRY32 procEntry = new PROCESSENTRY32();
-            procEntry.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32));
-
-            if (Process32First(snapshot, ref procEntry))
+            try
             {
-                do
-                {
-                    if (procEntry.th32ParentProcessID == pid)
-                    {
-                        pids.Add((int)procEntry.th32ProcessID);
+                PROCESSENTRY32 procEntry = new PROCESSENTRY32();
+                procEntry.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32));
 
-                        if (recursive) // Recursively find child processes
-                            pids.AddRange(FindChildProcesses((int)procEntry.th32ProcessID));
+                if (Process32First(snapshot, ref procEntry))
+                {
+                    do
+                    {
+                        if (procEntry.th32ParentProcessID == pid)
+                        {
+                            pids.Add((int)procEntry.th32ProcessID);
+
+                            if (recursive) // Recursively find child processes
+                                pids.AddRange(FindChildProcesses((int)procEntry.th32ProcessID));
+                        }
                     }
+                    while (Process32Next(snapshot, ref procEntry));
                 }
-                while (Process32Next(snapshot, ref procEntry));
+            }
+            finally
+            {
+                // Always release the snapshot HANDLE — it leaks otherwise, and this is
+                // called frequently from the child-process update timer.
+                CloseHandle(snapshot);
             }
 
             return pids;
@@ -238,8 +254,22 @@ namespace VRCX
 
                     proc.Kill();
                 }
-                catch
+                catch (ArgumentException)
                 {
+                    // process already exited between enumeration and GetProcessById
+                }
+                catch (InvalidOperationException)
+                {
+                    // process exited; ignore
+                }
+                catch (System.ComponentModel.Win32Exception ex)
+                {
+                    // process is protected, has admin rights, or access denied
+                    logger.Warn(ex, "Failed to kill child process {0}: {1}", p, ex.Message);
+                }
+                catch (Exception ex)
+                {
+                    logger.Warn(ex, "Unexpected error killing child process {0}", p);
                 }
             }
         }

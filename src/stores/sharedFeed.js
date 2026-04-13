@@ -30,6 +30,40 @@ export const useSharedFeedStore = defineStore('SharedFeed', () => {
 
     const onPlayerJoining = ref([]);
 
+    // Debounce + coalesce `rebuildOnPlayerJoining` calls. The previous
+    // implementation used `watch(..., { deep: true })` on the travelers
+    // Map which fires for every nested mutation. During large join bursts
+    // (e.g. instance join) this triggered an O(N) rebuild for every single
+    // nested change, pushing overall work to O(N^2). We now schedule a
+    // single rebuild per microtask burst and ensure only one rebuild runs
+    // at a time.
+    let rebuildScheduled = false;
+    let rebuildRunning = false;
+    let rebuildPending = false;
+    async function scheduleRebuildOnPlayerJoining() {
+        if (rebuildScheduled) {
+            return;
+        }
+        rebuildScheduled = true;
+        setTimeout(async () => {
+            rebuildScheduled = false;
+            if (rebuildRunning) {
+                rebuildPending = true;
+                return;
+            }
+            rebuildRunning = true;
+            try {
+                await rebuildOnPlayerJoining();
+            } finally {
+                rebuildRunning = false;
+            }
+            if (rebuildPending) {
+                rebuildPending = false;
+                scheduleRebuildOnPlayerJoining();
+            }
+        }, 150);
+    }
+
     async function rebuildOnPlayerJoining() {
         let newOnPlayerJoining = [];
         for (const ref of userStore.currentTravelers.values()) {
@@ -88,7 +122,7 @@ export const useSharedFeedStore = defineStore('SharedFeed', () => {
 
     watch(
         () => userStore.currentTravelers,
-        () => rebuildOnPlayerJoining(),
+        () => scheduleRebuildOnPlayerJoining(),
         { deep: true }
     );
 

@@ -40,7 +40,7 @@ export function calculateOverlapGrid(sessionsA, sessionsB) {
         grid[Math.floor(slot / 24)][slot % 24] = value;
     }
     const totalOverlapMs =
-        rawBuckets.reduce((sum, value) => sum + value, 0) * 60000;
+        rawBuckets.reduce((sum, value) => sum + value, 0) * 3600000;
     const totalUserAMs = sumDurations(sessionsA);
     const totalUserBMs = sumDurations(sessionsB);
     const minOnlineMs = Math.min(totalUserAMs, totalUserBMs);

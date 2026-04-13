@@ -1387,7 +1387,16 @@ export const useNotificationStore = defineStore('Notification', () => {
             .then(({ ok }) => {
                 if (ok) deleteNotificationLog(row);
             })
-            .catch(() => {});
+            .catch((err) => {
+                // The modal promise rejects when the user dismisses the
+                // dialog (e.g. ESC / backdrop click). That's expected and
+                // doesn't need surfacing. Anything else (unexpected modal
+                // failure) is worth at least logging so silent failures
+                // can be traced.
+                if (err) {
+                    console.error('deleteNotificationLogPrompt failed:', err);
+                }
+            });
     }
 
     /**

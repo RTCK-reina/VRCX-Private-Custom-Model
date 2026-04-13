@@ -331,7 +331,18 @@ function createWindow() {
         autoHideMenuBar: true,
         titleBarStyle: 'hiddenInset',
         webPreferences: {
-            preload: path.join(__dirname, 'preload.js')
+            preload: path.join(__dirname, 'preload.js'),
+            // Explicit hardening — these are the secure defaults in modern
+            // Electron, but making them explicit protects us from future
+            // default regressions and makes the security posture obvious
+            // to reviewers. All renderer <-> main IPC goes through the
+            // `contextBridge.exposeInMainWorld` API surface in preload.js.
+            contextIsolation: true,
+            nodeIntegration: false,
+            nodeIntegrationInWorker: false,
+            nodeIntegrationInSubFrames: false,
+            webSecurity: true,
+            sandbox: true
         }
     });
     applyWindowState();

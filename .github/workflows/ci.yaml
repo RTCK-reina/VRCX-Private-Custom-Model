@@ -51,3 +51,49 @@ jobs:
         run: |
           dotnet format whitespace --no-restore --verify-no-changes
           dotnet format style --no-restore --verify-no-changes
+
+  test_js:
+    name: Test JS (Vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+      - run: npm ci
+      - run: npm run test
+
+  typecheck_js:
+    name: Typecheck JS (tsc --checkJs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck:js
+
+  i18n_drift:
+    name: i18n drift check
+    runs-on: ubuntu-latest
+    # Soft-fail for now - there is a large pre-existing delta between
+    # en.json and several other locales. Flipping this to a hard failure
+    # will require a cleanup pass on the stale locales first.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+      - run: npm ci
+      - run: npm run localization -- check-drift

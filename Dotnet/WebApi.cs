@@ -1,12 +1,10 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -92,7 +90,11 @@ namespace VRCX
                 _httpHandler.UseProxy = true;
             }
 
-            _httpClient = new HttpClient(_httpHandler);
+            _httpClient = new HttpClient(_httpHandler)
+            {
+                // Default of 100s causes the UI to hang on slow/hanging endpoints.
+                Timeout = TimeSpan.FromSeconds(30)
+            };
             _httpClient.DefaultRequestHeaders.Add("User-Agent", Program.Version);
         }
 
@@ -157,53 +159,58 @@ namespace VRCX
                     { "@key", "default" }
                 }
             );
+
+            // No row yet — first run or post-logout. Nothing to load.
+            if (values.Length == 0 || values[0].Length == 0 || values[0][0] is not string base64 || string.IsNullOrEmpty(base64))
+                return;
+
             try
             {
-                var item = values[0];
-                using var stream = new MemoryStream(Convert.FromBase64String((string)item[0]));
-                CookieContainer = new CookieContainer();
-                CookieContainer.Add(System.Text.Json.JsonSerializer.Deserialize<CookieCollection>(stream));
+                using var stream = new MemoryStream(Convert.FromBase64String(base64));
+                var deserialized = System.Text.Json.JsonSerializer.Deserialize<CookieCollection>(stream);
+                if (deserialized == null)
+                {
+                    Logger.Warn("Cookie payload deserialized to null; keeping current container.");
+                    return;
+                }
+
+                // Build a fresh container only after successful deserialization, so a
+                // corrupt payload no longer silently wipes the user's session.
+                var newContainer = new CookieContainer();
+                newContainer.Add(deserialized);
+                CookieContainer = newContainer;
                 InitializeHttpClient();
             }
             catch (Exception e)
             {
-                Logger.Error($"Failed to load cookies: {e.Message}");
+                // Preserve the existing in-memory container on failure rather than
+                // resetting it to empty. The user keeps any session they currently have.
+                Logger.Error($"Failed to load cookies (existing session preserved): {e.Message}");
             }
         }
 
         private List<Cookie> GetAllCookies()
         {
-            var cookieTable = (Hashtable)CookieContainer.GetType().InvokeMember("m_domainTable",
-                BindingFlags.NonPublic |
-                BindingFlags.GetField |
-                BindingFlags.Instance,
-                null,
-                CookieContainer,
-                new object[] { });
-
+            // Use the public CookieContainer.GetAllCookies API (.NET 6+) instead of
+            // reaching into the private m_domainTable field via reflection. The
+            // reflection-based approach was brittle: any internal change to
+            // CookieContainer would silently break cookie persistence.
             var uniqueCookies = new Dictionary<string, Cookie>();
-            foreach (var item in cookieTable.Keys)
+            foreach (Cookie cookie in CookieContainer.GetAllCookies())
             {
-                var domain = (string)item;
-                if (string.IsNullOrEmpty(domain))
+                if (cookie == null || string.IsNullOrEmpty(cookie.Domain))
                     continue;
 
-                if (domain.StartsWith('.'))
-                    domain = domain[1..];
+                var domain = cookie.Domain.StartsWith('.')
+                    ? cookie.Domain[1..]
+                    : cookie.Domain;
 
-                var address = $"http://{domain}/";
-                if (!Uri.TryCreate(address, UriKind.Absolute, out var uri))
-                    continue;
-
-                foreach (Cookie cookie in CookieContainer.GetCookies(uri))
+                var key = $"{domain}.{cookie.Name}";
+                if (!uniqueCookies.TryGetValue(key, out var existing) ||
+                    cookie.TimeStamp > existing.TimeStamp)
                 {
-                    var key = $"{domain}.{cookie.Name}";
-                    if (!uniqueCookies.TryGetValue(key, out var value) ||
-                        cookie.TimeStamp > value.TimeStamp)
-                    {
-                        cookie.Expires = DateTime.MaxValue;
-                        uniqueCookies[key] = cookie;
-                    }
+                    cookie.Expires = DateTime.MaxValue;
+                    uniqueCookies[key] = cookie;
                 }
             }
 
@@ -248,15 +255,34 @@ namespace VRCX
 
         public void SetCookies(string cookies)
         {
+            if (string.IsNullOrEmpty(cookies))
+                return;
+
             try
             {
                 using var stream = new MemoryStream(Convert.FromBase64String(cookies));
                 var data = System.Text.Json.JsonSerializer.Deserialize<CookieCollection>(stream);
+                if (data == null)
+                {
+                    Logger.Warn("SetCookies: payload deserialized to null, ignoring.");
+                    return;
+                }
                 CookieContainer.Add(data);
+            }
+            catch (FormatException e)
+            {
+                Logger.Error($"Failed to set cookies (invalid base64): {e.Message}");
+                return;
+            }
+            catch (System.Text.Json.JsonException e)
+            {
+                Logger.Error($"Failed to set cookies (invalid JSON): {e.Message}");
+                return;
             }
             catch (Exception e)
             {
                 Logger.Error($"Failed to set cookies: {e.Message}");
+                return;
             }
 
             _cookieDirty = true; // force cookies to be saved for lastUserLoggedIn
