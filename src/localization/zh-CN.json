@@ -2658,6 +2658,7 @@
             "login_greeting": "你好，{name}！祝你拥有美好的一天！",
             "logout_greeting": "下次再见，{name}！",
             "email_2fa_resent": "已重发验证码邮件",
+            "email_2fa_failed": "重新发送2FA邮件失败，请重试。",
             "email_2fa_no_credentials": "由于登录数据无效，无法重新发送验证码邮件，请重新登录。",
             "incorrect_primary_password": "独立密码错误",
             "saved_credentials_invalid": "保存的账号信息不再有效，这可能是因为 IP 地址发生了变化导致登录状态过期。",

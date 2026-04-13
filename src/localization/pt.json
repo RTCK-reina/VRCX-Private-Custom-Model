@@ -2592,6 +2592,7 @@
             "login_greeting": "Olá, {name}!",
             "logout_greeting": "Até logo, {name}!",
             "email_2fa_resent": "E-mail 2FA reenviado.",
+            "email_2fa_failed": "Falha ao reenviar e-mail 2FA. Por favor, tente novamente.",
             "email_2fa_no_credentials": "Não é possível enviar e-mail 2FA sem credenciais salvas. Por favor, faça login novamente.",
             "incorrect_primary_password": "Senha principal incorreta",
             "saved_credentials_invalid": "As credenciais salvas não são mais válidas.",

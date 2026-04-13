@@ -2633,6 +2633,7 @@
             "login_greeting": "你好，{name}！",
             "logout_greeting": "再見，{name}！",
             "email_2fa_resent": "已重新發送電子郵件 2FA 驗證。",
+            "email_2fa_failed": "重新發送2FA郵件失敗，請重試。",
             "email_2fa_no_credentials": "沒有已儲存的登入憑證，無法發送 2FA 郵件。請重新登入。",
             "incorrect_primary_password": "主要密碼錯誤",
             "saved_credentials_invalid": "已儲存的登入憑證已失效。",

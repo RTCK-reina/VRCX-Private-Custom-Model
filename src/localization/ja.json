@@ -2617,6 +2617,7 @@
             "login_greeting": "{name} さん、こんにちは！",
             "logout_greeting": "またお会いしましょう、{name}！",
             "email_2fa_resent": "2FAメールを再送信しました。",
+            "email_2fa_failed": "2FAメールの再送信に失敗しました。もう一度お試しください。",
             "email_2fa_no_credentials": "保存された認証情報がないと2FAメールを送信できません。再度ログインしてください。",
             "incorrect_primary_password": "プライマリパスワードが正しくありません。",
             "saved_credentials_invalid": "保存された認証情報はもはや有効ではありません。",
